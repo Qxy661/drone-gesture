@@ -10,9 +10,12 @@
 """
 
 import sys
+import os
+sys.path.insert(0, os.path.dirname(__file__))
+
 import cv2
 import mediapipe as mp
-from gesture_definitions import classify_gesture, GESTURE_NAMES, GestureID
+from drone_gesture.gesture_definitions import classify_gesture, GESTURE_NAMES, GestureID
 
 
 def main():

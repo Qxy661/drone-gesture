@@ -51,14 +51,35 @@ PINKY_TIP = 20
 def is_finger_extended(landmarks, finger_tip, finger_pip, finger_mcp):
     """
     判断手指是否伸直
-    通过比较指尖(TIP)和指间关节(PIP)的y坐标
-    注意: 在图像坐标系中, y轴向下为正
+
+    使用两种检测方式的组合:
+    1. 指尖(TIP) vs 指间关节(PIP) 的 y 坐标比较
+    2. TIP-PIP-MCP 三点形成的夹角 (更鲁棒)
+
+    在图像坐标系中, y轴向下为正, 所以伸直时 tip_y < pip_y
     """
-    tip_y = landmarks[finger_tip].y
-    pip_y = landmarks[finger_pip].y
-    mcp_y = landmarks[finger_mcp].y
-    # 指尖y < 指间关节y 表示手指伸直 (向上)
-    return tip_y < pip_y
+    tip = landmarks[finger_tip]
+    pip = landmarks[finger_pip]
+    mcp = landmarks[finger_mcp]
+
+    # 方法1: y坐标比较 (快速)
+    y_extended = tip.y < pip.y
+
+    # 方法2: 向量夹角 (鲁棒)
+    # 向量 MCP->PIP 和 PIP->TIP 的夹角
+    v1x, v1y = pip.x - mcp.x, pip.y - mcp.y
+    v2x, v2y = tip.x - pip.x, tip.y - pip.y
+    dot = v1x * v2x + v1y * v2y
+    len1 = (v1x**2 + v1y**2)**0.5
+    len2 = (v2x**2 + v2y**2)**0.5
+    if len1 < 1e-6 or len2 < 1e-6:
+        return y_extended
+    cos_angle = max(-1.0, min(1.0, dot / (len1 * len2)))
+    angle_deg = abs(cos_angle)  # 接近1表示伸直(共线)
+    angle_extended = angle_deg > 0.5  # 约60度以内算伸直
+
+    # 两种方法投票: 都说伸直才算伸直, 降低误检
+    return y_extended and angle_extended
 
 
 def is_thumb_extended(landmarks):
@@ -116,12 +137,13 @@ def classify_gesture(landmarks):
         return GestureID.THUMBS_UP
 
     # OK手势: 拇指和食指形成圆圈, 其余伸直
-    # 通过拇指尖和食指尖的距离判断
+    # 放宽条件: pinch距离 < 0.08, 其余3指至少2个伸直
     thumb_tip = landmarks[THUMB_TIP]
     index_tip = landmarks[INDEX_TIP]
     pinch_dist = ((thumb_tip.x - index_tip.x)**2 + (thumb_tip.y - index_tip.y)**2)**0.5
 
-    if pinch_dist < 0.05 and middle_ext and ring_ext and pinky_ext:
+    three_fingers = [middle_ext, ring_ext, pinky_ext]
+    if pinch_dist < 0.08 and sum(three_fingers) >= 2:
         return GestureID.OK_SIGN
 
     return GestureID.NONE

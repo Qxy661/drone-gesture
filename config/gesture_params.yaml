@@ -26,3 +26,11 @@ safety_monitor:
     heartbeat_timeout_sec: 10.0
     connection_timeout_sec: 5.0
     auto_land_on_critical: true
+
+gesture_velocity_controller:
+  ros__parameters:
+    max_velocity: 1.0          # 最大速度 (m/s)
+    velocity_sensitivity: 2.0  # 速度放大系数
+    smoothing_alpha: 0.3       # 低通滤波系数 (越小越平滑)
+    dead_zone: 0.005           # 死区阈值 (消除手抖)
+    test_mode: true

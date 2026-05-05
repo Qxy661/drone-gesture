@@ -113,9 +113,11 @@ class SafetyMonitorNode(Node):
                 self._emergency_triggered = True
         elif self.warnings:
             self.safety_level = SafetyLevel.WARNING
-            self._emergency_triggered = False
+            # 不重置 _emergency_triggered: 只有完全恢复 OK 才重置
         else:
             self.safety_level = SafetyLevel.OK
+            if self._emergency_triggered:
+                self.get_logger().info('Safety: 所有警告已解除')
             self._emergency_triggered = False
 
         # 发布安全状态 JSON
