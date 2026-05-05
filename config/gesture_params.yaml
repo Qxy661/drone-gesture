@@ -1,0 +1,28 @@
+# ==========================================
+# Gesture Recognition System Parameters
+# ==========================================
+
+gesture_recognizer:
+  ros__parameters:
+    video_source: 0
+    model_complexity: 1
+    min_detection_confidence: 0.7
+    min_tracking_confidence: 0.5
+    publish_annotated_video: true
+    max_num_hands: 1
+
+gesture_commander:
+  ros__parameters:
+    takeoff_altitude: 1.0
+    forward_velocity: 0.5
+    forward_duration: 2.0
+    gesture_debounce_time: 1.5
+    test_mode: true
+
+safety_monitor:
+  ros__parameters:
+    battery_warning_pct: 30.0
+    battery_critical_pct: 15.0
+    heartbeat_timeout_sec: 10.0
+    connection_timeout_sec: 5.0
+    auto_land_on_critical: true
