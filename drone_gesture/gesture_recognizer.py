@@ -59,8 +59,7 @@ class GestureRecognizerNode(Node):
             self.cap = cv2.VideoCapture(int(self.video_source))
 
         if not self.cap.isOpened():
-            self.get_logger().error(f'无法打开视频源: {self.video_source}')
-            return
+            raise RuntimeError(f'无法打开视频源: {self.video_source}')
 
         self.bridge = CvBridge()
 
@@ -99,6 +98,7 @@ class GestureRecognizerNode(Node):
 
         gesture_id = GestureID.NONE
         landmarks_data = None
+        confidence = 0.0
 
         if results.multi_hand_landmarks:
             hand_landmarks = results.multi_hand_landmarks[0]
@@ -106,6 +106,12 @@ class GestureRecognizerNode(Node):
 
             # 分类手势
             gesture_id = classify_gesture(landmarks)
+
+            # 获取置信度
+            if results.multi_handedness:
+                confidence = results.multi_handedness[0].classification[0].score
+            else:
+                confidence = 0.5
 
             # 保存关键点数据
             landmarks_data = [
@@ -136,7 +142,7 @@ class GestureRecognizerNode(Node):
             payload = {
                 'gesture': GESTURE_NAMES[gesture_id],
                 'gesture_id': int(gesture_id),
-                'confidence': 1.0,
+                'confidence': confidence,
                 'frame': self.frame_count,
             }
             if landmarks_data:

@@ -44,6 +44,7 @@ class SafetyMonitorNode(Node):
         self.last_state_time = 0.0
         self.safety_level = SafetyLevel.OK
         self.warnings = []
+        self._emergency_triggered = False
 
         # QoS: BEST_EFFORT for sensor data
         qos = QoSProfile(depth=10, reliability=ReliabilityPolicy.BEST_EFFORT)
@@ -107,12 +108,15 @@ class SafetyMonitorNode(Node):
 
         if has_critical:
             self.safety_level = SafetyLevel.CRITICAL
-            if self.auto_land and self.fcu_armed:
+            if self.auto_land and self.fcu_armed and not self._emergency_triggered:
                 self._emergency_land()
+                self._emergency_triggered = True
         elif self.warnings:
             self.safety_level = SafetyLevel.WARNING
+            self._emergency_triggered = False
         else:
             self.safety_level = SafetyLevel.OK
+            self._emergency_triggered = False
 
         # 发布安全状态 JSON
         status = {

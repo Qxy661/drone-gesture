@@ -187,10 +187,14 @@ class GestureVelocityControllerNode(Node):
             self.current_gesture = gesture_id
 
             # 从 MediaPipe landmarks 提取手掌中心
-            # landmarks[9] = 中指 MCP, 近似手掌中心
-            if 'landmarks' in data and len(data['landmarks']) > 9:
-                lm = data['landmarks'][9]  # 中指根部
-                self.palm_center = (lm['x'], lm['y'], lm['z'])
+            # 使用 5 个指尖 (4,8,12,16,20) 取平均作为手掌中心
+            if 'landmarks' in data and len(data['landmarks']) > 20:
+                lms = data['landmarks']
+                tip_ids = [4, 8, 12, 16, 20]
+                cx = sum(lms[i]['x'] for i in tip_ids) / 5.0
+                cy = sum(lms[i]['y'] for i in tip_ids) / 5.0
+                cz = sum(lms[i]['z'] for i in tip_ids) / 5.0
+                self.palm_center = (cx, cy, cz)
         except (json.JSONDecodeError, KeyError, ValueError):
             pass
 

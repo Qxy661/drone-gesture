@@ -53,6 +53,7 @@ class GestureCommanderNode(Node):
         self.last_gesture_time = 0.0
         self.last_gesture_id = GestureID.NONE
         self.move_start_time = 0.0
+        self.takeoff_start_time = 0.0
 
         qos = QoSProfile(depth=10, reliability=ReliabilityPolicy.BEST_EFFORT)
         self.gesture_sub = self.create_subscription(
@@ -115,6 +116,7 @@ class GestureCommanderNode(Node):
                 self._set_mode('GUIDED')
                 self._arm(True)
                 self.drone_state = DroneState.ARMING
+                self.takeoff_start_time = time.time()
 
     def _handle_land(self):
         if self.drone_state in (DroneState.HOVERING, DroneState.MOVING):
@@ -172,7 +174,7 @@ class GestureCommanderNode(Node):
                     self.pos_pub.publish(msg)
                 self.drone_state = DroneState.TAKING_OFF
         elif self.drone_state == DroneState.TAKING_OFF:
-            if now - self.last_gesture_time > 5.0:
+            if now - self.takeoff_start_time > 5.0:
                 self.drone_state = DroneState.HOVERING
                 self.get_logger().info('悬停')
         elif self.drone_state == DroneState.MOVING:
@@ -181,6 +183,8 @@ class GestureCommanderNode(Node):
                 if not self.test_mode:
                     self._send_velocity(0.0, 0.0, 0.0)
                 self.get_logger().info('前进完成')
+            elif not self.test_mode:
+                self._send_velocity(self.forward_vel, 0.0, 0.0)
         elif self.drone_state == DroneState.LANDING:
             if self.test_mode or not self.armed:
                 self.drone_state = DroneState.IDLE
