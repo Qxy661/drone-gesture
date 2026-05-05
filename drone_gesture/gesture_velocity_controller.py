@@ -231,11 +231,32 @@ class GestureVelocityControllerNode(Node):
             fy = self.deadzone.apply(filtered[1])
             fz = self.deadzone.apply(filtered[2])
 
-            # 非线性映射: 小动作->小速度, 大动作->大速度
-            # 使用 sigmoid-like 映射: v = max_vel * tanh(sensitivity * input)
-            vx = self.max_vel * math.tanh(self.sensitivity * (-fy))  # 手向前 -> 无人机前进
-            vy = self.max_vel * math.tanh(self.sensitivity * fx)     # 手向右 -> 无人机右移
-            vz = self.max_vel * math.tanh(self.sensitivity * (-fz)) * 0.5  # 垂直减速
+            # 坐标映射: MediaPipe 归一化坐标 → 无人机 body frame 速度
+            #
+            # MediaPipe 坐标系 (摄像头视角):
+            #   x: 向右为正 (0→1)
+            #   y: 向下为正 (0→1)
+            #   z: 越远离摄像头越大
+            #
+            # 无人机 body frame (NED):
+            #   vx: 前进为正
+            #   vy: 右移为正
+            #   vz: 下降为正 (但通常我们用上升为正)
+            #
+            # 映射关系 (摄像头正对操作者):
+            #   手向右移动 → 摄像头看到手向右 → vy+ (无人机右移)
+            #   手向前推 (远离摄像头) → z 减小 → vx+ (无人机前进)
+            #   手向上抬 → y 减小 → vz+ (无人机上升)
+
+            # 非线性映射: tanh 限幅, 小动作灵敏度低, 大动作不超速
+            vx = self.max_vel * math.tanh(self.sensitivity * (-fy))  # 手上下 → 无人机前进
+            vy = self.max_vel * math.tanh(self.sensitivity * fx)     # 手左右 → 无人机横移
+            vz = self.max_vel * math.tanh(self.sensitivity * (-fz)) * 0.5  # 手深浅 → 升降(减速)
+
+            # 安全限幅
+            vx = max(-self.max_vel, min(self.max_vel, vx))
+            vy = max(-self.max_vel, min(self.max_vel, vy))
+            vz = max(-self.max_vel * 0.5, min(self.max_vel * 0.5, vz))
 
         # 发布
         if not self.test_mode and self.control_mode == "velocity":

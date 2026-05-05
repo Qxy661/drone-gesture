@@ -110,7 +110,8 @@ class GestureCommanderNode(Node):
         if self.drone_state == DroneState.IDLE:
             self.get_logger().info('>>> 起飞指令')
             if self.test_mode:
-                self.drone_state = DroneState.HOVERING
+                self.drone_state = DroneState.TAKING_OFF
+                self.takeoff_start_time = time.time()
                 self.get_logger().info('[测试] 模拟起飞')
             else:
                 self._set_mode('GUIDED')
@@ -122,7 +123,7 @@ class GestureCommanderNode(Node):
         if self.drone_state in (DroneState.HOVERING, DroneState.MOVING):
             self.get_logger().info('>>> 降落指令')
             if self.test_mode:
-                self.drone_state = DroneState.IDLE
+                self.drone_state = DroneState.LANDING
                 self.get_logger().info('[测试] 模拟降落')
             else:
                 self._set_mode('LAND')
@@ -137,7 +138,12 @@ class GestureCommanderNode(Node):
                 self._send_velocity(self.forward_vel, 0.0, 0.0)
 
     def _handle_toggle_mode(self):
-        self.get_logger().info('>>> OK手势 - 功能键')
+        """OK手势: 紧急停止 — 立即悬停"""
+        self.get_logger().info('>>> OK手势 - 紧急悬停')
+        if self.drone_state == DroneState.MOVING:
+            self.drone_state = DroneState.HOVERING
+            if not self.test_mode:
+                self._send_velocity(0.0, 0.0, 0.0)
 
     def _send_velocity(self, vx, vy, vz):
         msg = TwistStamped()
@@ -153,7 +159,10 @@ class GestureCommanderNode(Node):
             return
         req = SetMode.Request()
         req.custom_mode = mode
-        self.set_mode_client.call_async(req)
+        future = self.set_mode_client.call_async(req)
+        future.add_done_callback(
+            lambda f: self.get_logger().info(
+                f'模式切换 {mode}: {"成功" if f.result().mode_sent else "失败"}'))
 
     def _arm(self, arm):
         if not self.arming_client.wait_for_service(timeout_sec=2.0):
@@ -161,20 +170,37 @@ class GestureCommanderNode(Node):
             return
         req = CommandBool.Request()
         req.value = arm
-        self.arming_client.call_async(req)
+        future = self.arming_client.call_async(req)
+        future.add_done_callback(
+            lambda f: self.get_logger().info(
+                f'{"解锁" if arm else "上锁"}: {"成功" if f.result().success else "失败"}'))
 
     def update_state(self):
         now = time.time()
         if self.drone_state == DroneState.ARMING:
-            if self.test_mode or self.armed:
+            # 等待飞控解锁成功, 然后发送起飞目标点
+            if self.armed:
                 if not self.test_mode:
                     msg = PoseStamped()
                     msg.header.stamp = self.get_clock().now().to_msg()
                     msg.pose.position.z = self.takeoff_alt
                     self.pos_pub.publish(msg)
                 self.drone_state = DroneState.TAKING_OFF
+                self.takeoff_start_time = time.time()  # 从此刻开始计时
+                self.get_logger().info('已解锁, 开始起飞')
         elif self.drone_state == DroneState.TAKING_OFF:
-            if now - self.takeoff_start_time > 5.0:
+            # 持续发送起飞目标点 (MAVROS 需要持续 setpoint)
+            if not self.test_mode:
+                msg = PoseStamped()
+                msg.header.stamp = self.get_clock().now().to_msg()
+                msg.pose.position.z = self.takeoff_alt
+                self.pos_pub.publish(msg)
+            # 超时或测试模式下切换到悬停
+            if self.test_mode:
+                if now - self.takeoff_start_time > 3.0:
+                    self.drone_state = DroneState.HOVERING
+                    self.get_logger().info('悬停 (测试)')
+            elif now - self.takeoff_start_time > 8.0:
                 self.drone_state = DroneState.HOVERING
                 self.get_logger().info('悬停')
         elif self.drone_state == DroneState.MOVING:
@@ -186,8 +212,13 @@ class GestureCommanderNode(Node):
             elif not self.test_mode:
                 self._send_velocity(self.forward_vel, 0.0, 0.0)
         elif self.drone_state == DroneState.LANDING:
-            if self.test_mode or not self.armed:
+            if self.test_mode:
+                if now - self.takeoff_start_time > 3.0 if self.takeoff_start_time else True:
+                    self.drone_state = DroneState.IDLE
+                    self.get_logger().info('已降落 (测试)')
+            elif not self.armed:
                 self.drone_state = DroneState.IDLE
+                self.get_logger().info('已降落')
 
 
 def main(args=None):

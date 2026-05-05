@@ -1,20 +1,27 @@
 """Tests for safety_monitor.py - safety level logic and thresholds."""
 import sys
 import os
+import unittest
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 import time
-from drone_gesture.safety_monitor import SafetyLevel
+
+try:
+    from drone_gesture.safety_monitor import SafetyLevel
+    HAS_SAFETY = True
+except ImportError:
+    HAS_SAFETY = False
 
 
-class TestSafetyLevel:
+@unittest.skipUnless(HAS_SAFETY, "rclpy not available")
+class TestSafetyLevel(unittest.TestCase):
     def test_constants(self):
         assert SafetyLevel.OK == "ok"
         assert SafetyLevel.WARNING == "warning"
         assert SafetyLevel.CRITICAL == "critical"
 
 
-class TestSafetyLogic:
+class TestSafetyLogic(unittest.TestCase):
     """Test safety check logic without ROS2."""
 
     def test_battery_critical(self):
@@ -107,5 +114,4 @@ class TestSafetyLogic:
 
 
 if __name__ == '__main__':
-    import pytest
-    pytest.main([__file__, '-v'])
+    unittest.main()

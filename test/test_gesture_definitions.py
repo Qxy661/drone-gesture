@@ -1,6 +1,7 @@
 """Tests for gesture_definitions.py - gesture classification logic."""
 import sys
 import os
+import unittest
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 from drone_gesture.gesture_definitions import (
@@ -18,7 +19,7 @@ class FakeLandmark:
 def make_landmarks(thumb_tip_x=0.5, thumb_tip_y=0.3,
                    fingers_extended=True):
     """Create fake 21 landmarks for testing."""
-    lms = [FakeLandmark(0.5, 0.5)] * 21  # default all at center
+    lms = [FakeLandmark(0.5, 0.5)] * 21
 
     # Wrist
     lms[0] = FakeLandmark(0.5, 0.8)
@@ -30,7 +31,7 @@ def make_landmarks(thumb_tip_x=0.5, thumb_tip_y=0.3,
     lms[4] = FakeLandmark(thumb_tip_x, thumb_tip_y)  # TIP
 
     if fingers_extended:
-        # Index finger extended (tip above pip)
+        # Index finger extended (tip above pip, collinear)
         lms[5] = FakeLandmark(0.45, 0.6)   # MCP
         lms[6] = FakeLandmark(0.45, 0.45)  # PIP
         lms[7] = FakeLandmark(0.45, 0.35)  # DIP
@@ -54,17 +55,17 @@ def make_landmarks(thumb_tip_x=0.5, thumb_tip_y=0.3,
         lms[19] = FakeLandmark(0.6, 0.35)
         lms[20] = FakeLandmark(0.6, 0.25)
     else:
-        # All fingers curled (tip below pip)
+        # All fingers curled (tip below pip, angle not collinear)
         for base in [5, 9, 13, 17]:
-            lms[base] = FakeLandmark(0.5, 0.6)
-            lms[base+1] = FakeLandmark(0.5, 0.55)
-            lms[base+2] = FakeLandmark(0.5, 0.58)
-            lms[base+3] = FakeLandmark(0.5, 0.62)
+            lms[base] = FakeLandmark(0.5, 0.6)     # MCP
+            lms[base+1] = FakeLandmark(0.5, 0.55)   # PIP
+            lms[base+2] = FakeLandmark(0.52, 0.58)  # DIP (angled)
+            lms[base+3] = FakeLandmark(0.53, 0.62)  # TIP (below PIP)
 
     return lms
 
 
-class TestGestureID:
+class TestGestureID(unittest.TestCase):
     def test_enum_values(self):
         assert GestureID.NONE == 0
         assert GestureID.OPEN_PALM == 1
@@ -78,7 +79,29 @@ class TestGestureID:
         assert GESTURE_NAMES[GestureID.FIST] == 'fist'
 
 
-class TestClassifyGesture:
+class TestIsFingerExtended(unittest.TestCase):
+    def test_extended_collinear(self):
+        """Collinear vertical fingers should be extended."""
+        lms = make_landmarks(fingers_extended=True)
+        assert is_finger_extended(lms, 8, 6, 5) == True
+
+    def test_curled(self):
+        """Curled fingers (tip below PIP, angled) should not be extended."""
+        lms = make_landmarks(fingers_extended=False)
+        assert is_finger_extended(lms, 8, 6, 5) == False
+
+    def test_tip_at_pip(self):
+        """Tip at same height as PIP should not be extended."""
+        lms = [FakeLandmark(0.5, 0.5)] * 21
+        lms[5] = FakeLandmark(0.5, 0.6)   # MCP
+        lms[6] = FakeLandmark(0.5, 0.45)  # PIP
+        lms[7] = FakeLandmark(0.5, 0.45)  # DIP = PIP
+        lms[8] = FakeLandmark(0.5, 0.45)  # TIP = PIP
+        # tip.y == pip.y → y_extended is False
+        assert is_finger_extended(lms, 8, 6, 5) == False
+
+
+class TestClassifyGesture(unittest.TestCase):
     def test_none_landmarks(self):
         assert classify_gesture(None) == GestureID.NONE
 
@@ -93,55 +116,54 @@ class TestClassifyGesture:
     def test_fist(self):
         lms = make_landmarks(thumb_tip_x=0.48, thumb_tip_y=0.75,
                              fingers_extended=False)
-        # Thumb also needs to be curled (tip close to wrist)
         assert classify_gesture(lms) == GestureID.FIST
 
     def test_thumbs_up(self):
         lms = make_landmarks(thumb_tip_x=0.3, thumb_tip_y=0.3,
                              fingers_extended=False)
-        # Thumb extended (far from wrist), fingers curled
         result = classify_gesture(lms)
         assert result == GestureID.THUMBS_UP
 
-    def test_ok_sign(self):
-        # OK sign: thumb+index form circle (not extended), other 3 fingers extended
-        lms = make_landmarks(thumb_tip_x=0.48, thumb_tip_y=0.25,
-                             fingers_extended=True)
-        # Make thumb NOT extended (tip close to wrist, closer than IP)
-        lms[4] = FakeLandmark(0.49, 0.78)  # thumb tip near wrist
-        # Index NOT extended (tip below PIP)
-        lms[8] = FakeLandmark(0.45, 0.50)  # index tip below PIP at 0.45
-        # But thumb+index tips close together for pinch detection
-        lms[4] = FakeLandmark(0.452, 0.252)
-        lms[8] = FakeLandmark(0.45, 0.25)
-        # Check: is_thumb_extended -> tip_dist vs ip_dist
-        # wrist=(0.5,0.8), thumb_ip=(0.40,0.55), thumb_tip=(0.452,0.252)
-        # tip_dist = sqrt(0.048^2 + 0.548^2) = 0.550
-        # ip_dist = sqrt(0.1^2 + 0.25^2) = 0.269
-        # tip_dist > ip_dist*1.1 -> True -> thumb is extended
-        # Need thumb closer to wrist to NOT be extended
-        # Use different landmarks where thumb curls back
-        lms[4] = FakeLandmark(0.48, 0.72)  # thumb tip between MCP and wrist
-        # index curled: tip below PIP
-        lms[8] = FakeLandmark(0.45, 0.50)
-        # pinch distance: thumb_tip(0.48,0.72) vs index_tip(0.45,0.50) = 0.22 > 0.05
-        # Not close enough. Need a different approach.
-        # OK sign test is tricky with static landmarks; skip detailed assertion
-        # Just verify that none/other gestures work
+    def test_ok_sign_lenient(self):
+        """OK sign should be detected with pinch distance < 0.08."""
+        lms = make_landmarks(thumb_tip_x=0.48, thumb_tip_y=0.75,
+                             fingers_extended=False)
+        # Set up pinch: thumb and index tips close together
+        # Both tips near PIP level so index registers as curled
+        lms[4] = FakeLandmark(0.505, 0.555)  # thumb tip near index PIP
+        # Index finger: tip near PIP (not extended)
+        lms[5] = FakeLandmark(0.5, 0.6)    # MCP
+        lms[6] = FakeLandmark(0.5, 0.55)   # PIP
+        lms[7] = FakeLandmark(0.51, 0.56)  # DIP (slightly below)
+        lms[8] = FakeLandmark(0.505, 0.555) # TIP (at PIP level, curled)
+        # Make 3 other fingers extended
+        for base in [9, 13, 17]:
+            lms[base] = FakeLandmark(0.5, 0.6)
+            lms[base+1] = FakeLandmark(0.5, 0.45)
+            lms[base+2] = FakeLandmark(0.5, 0.35)
+            lms[base+3] = FakeLandmark(0.5, 0.25)
+        # Pinch dist = sqrt(0.005^2 + 0.005^2) ≈ 0.007 < 0.08
         result = classify_gesture(lms)
-        assert result in (GestureID.NONE, GestureID.FIST, GestureID.OK_SIGN)
+        assert result == GestureID.OK_SIGN
 
 
-class TestIsFingerExtended:
+class TestIsThumbExtended(unittest.TestCase):
     def test_extended(self):
-        lms = make_landmarks(fingers_extended=True)
-        assert is_finger_extended(lms, 8, 6, 5) == True  # index
+        """Thumb tip far from wrist = extended."""
+        lms = [FakeLandmark(0.5, 0.5)] * 21
+        lms[0] = FakeLandmark(0.5, 0.8)   # wrist
+        lms[3] = FakeLandmark(0.40, 0.55)  # IP
+        lms[4] = FakeLandmark(0.30, 0.30)  # TIP (far from wrist)
+        assert is_thumb_extended(lms) == True
 
     def test_curled(self):
-        lms = make_landmarks(fingers_extended=False)
-        assert is_finger_extended(lms, 8, 6, 5) == False  # index
+        """Thumb tip close to wrist = not extended."""
+        lms = [FakeLandmark(0.5, 0.5)] * 21
+        lms[0] = FakeLandmark(0.5, 0.8)   # wrist
+        lms[3] = FakeLandmark(0.40, 0.55)  # IP
+        lms[4] = FakeLandmark(0.48, 0.72)  # TIP (close to wrist)
+        assert is_thumb_extended(lms) == False
 
 
 if __name__ == '__main__':
-    import pytest
-    pytest.main([__file__, '-v'])
+    unittest.main()

@@ -1,15 +1,22 @@
 """Tests for gesture_velocity_controller.py - filters and velocity estimation."""
 import sys
 import os
+import unittest
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 import time
-from drone_gesture.gesture_velocity_controller import (
-    LowPassFilter, DeadZoneFilter, HandVelocityEstimator
-)
+
+try:
+    from drone_gesture.gesture_velocity_controller import (
+        LowPassFilter, DeadZoneFilter, HandVelocityEstimator
+    )
+    HAS_VELOCITY = True
+except ImportError:
+    HAS_VELOCITY = False
 
 
-class TestLowPassFilter:
+@unittest.skipUnless(HAS_VELOCITY, "rclpy not available")
+class TestLowPassFilter(unittest.TestCase):
     def test_initial_state(self):
         f = LowPassFilter(alpha=0.3, dim=3)
         assert f.state == [0.0, 0.0, 0.0]
@@ -42,7 +49,8 @@ class TestLowPassFilter:
         assert f_smooth.state[0] < f_fast.state[0]
 
 
-class TestDeadZoneFilter:
+@unittest.skipUnless(HAS_VELOCITY, "rclpy not available")
+class TestDeadZoneFilter(unittest.TestCase):
     def test_within_deadzone(self):
         dz = DeadZoneFilter(threshold=0.01)
         assert dz.apply(0.005) == 0.0
@@ -72,7 +80,8 @@ class TestDeadZoneFilter:
         assert just_outside < 0.001  # small but non-zero
 
 
-class TestHandVelocityEstimator:
+@unittest.skipUnless(HAS_VELOCITY, "rclpy not available")
+class TestHandVelocityEstimator(unittest.TestCase):
     def test_initial_update(self):
         est = HandVelocityEstimator(smoothing=0.4)
         vx, vy, vz = est.update(0.5, 0.5, 0.5, 1.0)
@@ -112,5 +121,4 @@ class TestHandVelocityEstimator:
 
 
 if __name__ == '__main__':
-    import pytest
-    pytest.main([__file__, '-v'])
+    unittest.main()
