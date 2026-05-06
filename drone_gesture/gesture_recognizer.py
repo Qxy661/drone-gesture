@@ -90,16 +90,20 @@ class GestureRecognizerNode(Node):
         self.get_logger().info(f'手势识别节点已启动, 视频源: {self.video_source}')
 
     def process_frame(self):
-        ret, frame = self.cap.read()
-        if not ret:
-            self.get_logger().warn('无法读取视频帧')
+        try:
+            ret, frame = self.cap.read()
+            if not ret:
+                self.get_logger().warn('无法读取视频帧')
+                return
+
+            self.frame_count += 1
+
+            # 转换颜色空间 BGR → RGB
+            rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            results = self.hands.process(rgb_frame)
+        except Exception as e:
+            self.get_logger().error(f'process_frame 异常: {e}')
             return
-
-        self.frame_count += 1
-
-        # 转换颜色空间 BGR → RGB
-        rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        results = self.hands.process(rgb_frame)
 
         gesture_id = GestureID.NONE
         landmarks_data = None
@@ -182,9 +186,10 @@ class GestureRecognizerNode(Node):
                 self.get_logger().error(f'图像转换失败: {e}')
 
     def destroy_node(self):
-        if self.cap.isOpened():
+        if hasattr(self, 'cap') and self.cap.isOpened():
             self.cap.release()
-        self.hands.close()
+        if hasattr(self, 'hands'):
+            self.hands.close()
         super().destroy_node()
 
 
