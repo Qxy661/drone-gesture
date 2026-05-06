@@ -3,7 +3,9 @@
 基于 MediaPipe Hands 21个关键点的手势分类
 """
 
+from __future__ import annotations
 from enum import IntEnum
+from typing import Optional
 
 
 class GestureID(IntEnum):
@@ -48,7 +50,7 @@ PINKY_DIP = 19
 PINKY_TIP = 20
 
 
-def is_finger_extended(landmarks, finger_tip, finger_pip, finger_mcp):
+def is_finger_extended(landmarks: list, finger_tip: int, finger_pip: int, finger_mcp: int) -> bool:
     """
     判断手指是否伸直
 
@@ -75,14 +77,15 @@ def is_finger_extended(landmarks, finger_tip, finger_pip, finger_mcp):
     if len1 < 1e-6 or len2 < 1e-6:
         return y_extended
     cos_angle = max(-1.0, min(1.0, dot / (len1 * len2)))
-    angle_deg = abs(cos_angle)  # 接近1表示伸直(共线)
-    angle_extended = angle_deg > 0.5  # 约60度以内算伸直
+    # cos_angle > 0.5 表示夹角 < 60度，即基本伸直
+    # 不能用 abs()，否则反平行(cos≈-1)也会被误判为伸直
+    angle_extended = cos_angle > 0.5
 
     # 两种方法投票: 都说伸直才算伸直, 降低误检
     return y_extended and angle_extended
 
 
-def is_thumb_extended(landmarks):
+def is_thumb_extended(landmarks: list) -> bool:
     """
     判断拇指是否伸直
     拇指的判断方式不同, 因为它横向运动
@@ -101,7 +104,7 @@ def is_thumb_extended(landmarks):
     return tip_dist > ip_dist * 1.1
 
 
-def classify_gesture(landmarks):
+def classify_gesture(landmarks: Optional[list]) -> GestureID:
     """
     根据手部关键点分类手势
 

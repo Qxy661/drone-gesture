@@ -100,6 +100,19 @@ class TestIsFingerExtended(unittest.TestCase):
         # tip.y == pip.y → y_extended is False
         assert is_finger_extended(lms, 8, 6, 5) == False
 
+    def test_anti_parallel_not_extended(self):
+        """反平行向量 (手指折叠回来) 不应被判为伸直。
+        Bug #6 regression: 之前 abs(cos_angle) 会把 cos≈-1 误判为伸直。"""
+        lms = [FakeLandmark(0.5, 0.5)] * 21
+        # MCP → PIP 向上, PIP → TIP 向下 (反平行)
+        lms[5] = FakeLandmark(0.5, 0.7)   # MCP
+        lms[6] = FakeLandmark(0.5, 0.5)   # PIP
+        lms[7] = FakeLandmark(0.5, 0.55)  # DIP
+        lms[8] = FakeLandmark(0.5, 0.7)   # TIP (回到 MCP 高度)
+        # y_extended: tip.y(0.7) > pip.y(0.5) → False
+        # angle: MCP→PIP=(0,-0.2), PIP→TIP=(0,0.2), cos=-1 → angle_extended=False
+        assert is_finger_extended(lms, 8, 6, 5) == False
+
 
 class TestClassifyGesture(unittest.TestCase):
     def test_none_landmarks(self):

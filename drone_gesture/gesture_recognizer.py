@@ -5,7 +5,6 @@
 
 import json
 import cv2
-import numpy as np
 import mediapipe as mp
 
 import rclpy
@@ -55,10 +54,16 @@ class GestureRecognizerNode(Node):
         # OpenCV 视频源
         if isinstance(self.video_source, str) and self.video_source.startswith(('rtsp://', 'http://')):
             self.cap = cv2.VideoCapture(self.video_source)
+        elif isinstance(self.video_source, int):
+            self.cap = cv2.VideoCapture(self.video_source)
         else:
-            self.cap = cv2.VideoCapture(int(self.video_source))
+            try:
+                self.cap = cv2.VideoCapture(int(self.video_source))
+            except (ValueError, TypeError):
+                self.cap = cv2.VideoCapture(self.video_source)
 
         if not self.cap.isOpened():
+            self.hands.close()
             raise RuntimeError(f'无法打开视频源: {self.video_source}')
 
         self.bridge = CvBridge()
@@ -173,7 +178,7 @@ class GestureRecognizerNode(Node):
                 img_msg = self.bridge.cv2_to_imgmsg(frame, 'bgr8')
                 img_msg.header.stamp = self.get_clock().now().to_msg()
                 self.image_pub.publish(img_msg)
-            except Exception as e:
+            except (TypeError, ValueError, cv2.error) as e:
                 self.get_logger().error(f'图像转换失败: {e}')
 
     def destroy_node(self):
