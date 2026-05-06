@@ -263,7 +263,7 @@ class GestureVelocityControllerNode(Node):
             vy = max(-self.max_vel, min(self.max_vel, vy))
             vz = max(-self.max_vel * 0.5, min(self.max_vel * 0.5, vz))
 
-        # 发布速度命令 (所有模式都发布，由 commander 决定是否转发到 MAVROS)
+        # 发布速度命令 (仅 velocity 模式，由 commander 决定是否转发到 MAVROS)
         if self.control_mode == "velocity":
             vel_msg = TwistStamped()
             vel_msg.header.stamp = self.get_clock().now().to_msg()

@@ -21,7 +21,6 @@ setup(
     install_requires=[
         "setuptools",
         "mediapipe",
-        "opencv-python",
         "numpy",
         "psutil",
     ],

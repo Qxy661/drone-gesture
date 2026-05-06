@@ -67,7 +67,7 @@ class GestureCommanderNode(Node):
         self.gesture_sub = self.create_subscription(
             String, '/gesture', self.gesture_callback, qos)
 
-        # 订阅速度控制器的输出，在 HOVERING/MOVING 状态下转发到 MAVROS
+        # 订阅速度控制器的输出，仅在 HOVERING 状态下转发到 MAVROS
         self.vel_cmd_sub = self.create_subscription(
             TwistStamped, '/gesture/velocity_cmd', self._velocity_cmd_cb, 10)
 
@@ -173,8 +173,16 @@ class GestureCommanderNode(Node):
         self.vel_pub.publish(msg)
 
     def _set_mode(self, mode):
+        self.mode_retry_count = 0
+        self._max_mode_retries = 3
+        self._do_set_mode(mode)
+
+    def _do_set_mode(self, mode):
         if not self.set_mode_client.service_is_ready():
-            self.get_logger().warn('set_mode 服务未就绪，跳过')
+            self.get_logger().warn('set_mode 服务未就绪，1秒后重试')
+            if self.mode_retry_count < self._max_mode_retries:
+                self.mode_retry_count += 1
+                self.create_timer(1.0, lambda: self._do_set_mode(mode))
             return
         req = SetMode.Request()
         req.custom_mode = mode
@@ -188,15 +196,18 @@ class GestureCommanderNode(Node):
                 self.get_logger().info(f'模式切换 {mode}: 成功')
             else:
                 self.get_logger().warn(f'模式切换 {mode}: 失败')
-                if self.mode_retry_count < self.max_arm_retries:
+                if self.mode_retry_count < self._max_mode_retries:
                     self.mode_retry_count += 1
-                    self._set_mode(mode)
+                    self._do_set_mode(mode)
         except Exception as e:
             self.get_logger().error(f'模式切换异常: {e}')
 
     def _arm(self, arm):
         if not self.arming_client.service_is_ready():
-            self.get_logger().warn('arming 服务未就绪，跳过')
+            self.get_logger().warn('arming 服务未就绪，1秒后重试')
+            if self.arm_retry_count < self.max_arm_retries:
+                self.arm_retry_count += 1
+                self.create_timer(1.0, lambda: self._arm(arm))
             return
         req = CommandBool.Request()
         req.value = arm

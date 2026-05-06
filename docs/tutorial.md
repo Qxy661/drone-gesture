@@ -193,6 +193,12 @@ tip_dist > ip_dist * 1.1  →  拇指伸直
 └────────┬────────┘
          │
          ▼
+   /gesture/velocity_cmd
+         │
+         ▼
+  gesture_commander (转发到 MAVROS)
+         │
+         ▼
    /mavros/setpoint_velocity/cmd_vel
 ```
 
@@ -295,7 +301,8 @@ HOVERING ──(握拳)──→ LANDING ──(落地)──→ IDLE
 | `/gesture/velocity_status` | String (JSON) | velocity_controller | (监控) |
 | `/drone/safety_status` | String (JSON) | safety_monitor | diagnostics |
 | `/drone/diagnostics` | String (JSON) | diagnostics | (监控) |
-| `/mavros/setpoint_velocity/cmd_vel` | TwistStamped | commander, velocity_controller | MAVROS |
+| `/gesture/velocity_cmd` | TwistStamped | velocity_controller | commander |
+| `/mavros/setpoint_velocity/cmd_vel` | TwistStamped | commander | MAVROS |
 | `/mavros/setpoint_position/local` | PoseStamped | commander | MAVROS |
 | `/mavros/state` | State | MAVROS | commander, safety_monitor |
 | `/mavros/battery` | BatteryState | MAVROS | safety_monitor |
