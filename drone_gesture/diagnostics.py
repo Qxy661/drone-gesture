@@ -1,6 +1,12 @@
 import json
 import time
-import psutil
+
+try:
+    import psutil
+    HAS_PSUTIL = True
+except ImportError:
+    HAS_PSUTIL = False
+
 import rclpy
 from rclpy.node import Node
 from std_msgs.msg import String
@@ -65,16 +71,19 @@ class DiagnosticsNode(Node):
 
     def _collect(self):
         now = time.time()
-        cpu = psutil.cpu_percent(interval=None)
-        mem = psutil.virtual_memory()
-        return {
-            "timestamp": now,
-            "uptime_sec": round(now - self.start_time, 1),
-            "system": {
+        system_info = {}
+        if HAS_PSUTIL:
+            cpu = psutil.cpu_percent(interval=None)
+            mem = psutil.virtual_memory()
+            system_info = {
                 "cpu_percent": cpu,
                 "memory_percent": mem.percent,
                 "memory_used_mb": round(mem.used / 1024 / 1024),
-            },
+            }
+        return {
+            "timestamp": now,
+            "uptime_sec": round(now - self.start_time, 1),
+            "system": system_info,
             "gesture": {
                 "total_frames": self.gesture_count,
                 "fps": round(self.gesture_fps, 1),

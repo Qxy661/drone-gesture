@@ -18,7 +18,12 @@ setup(
             "config/gesture_params.yaml",
         ]),
     ],
-    install_requires=["setuptools"],
+    install_requires=[
+        "setuptools",
+        "mediapipe",
+        "numpy",
+        "psutil",
+    ],
     zip_safe=True,
     maintainer="user",
     maintainer_email="dev@example.com",

@@ -26,8 +26,7 @@ Continuous Gesture Velocity Controller
 import json
 import math
 import time
-from collections import deque
-from typing import Optional, Tuple
+from typing import Tuple
 
 import rclpy
 from rclpy.node import Node
@@ -127,13 +126,13 @@ class HandVelocityEstimator:
 class GestureVelocityControllerNode(Node):
     """手势连续速度控制节点
 
-    订阅 /gesture_raw (原始手势关键点) 和 /gesture (离散手势)
-    发布 /mavros/setpoint_velocity/cmd_vel (连续速度命令)
+    订阅 /gesture (离散手势 + landmarks)
+    发布 /gesture/velocity_cmd (速度命令，由 commander 转发到 MAVROS)
 
     控制模式:
     - IDLE: 手势为握拳或无手 -> 不发送速度
-    - VELOCITY_CONTROL: 张开手 -> 用手部运动控制无人机速度
-    - DISCRETE: OK手势 -> 触发离散命令(拍照等)
+    - velocity: 张开手 -> 用手部运动控制无人机速度
+    - discrete: OK手势 -> 触发离散命令(拍照等)
     """
     def __init__(self):
         super().__init__('gesture_velocity_controller')
@@ -167,9 +166,11 @@ class GestureVelocityControllerNode(Node):
         self.create_subscription(String, '/gesture', self._gesture_cb, qos)
 
         # 发布
-        if not self.test_mode:
-            self.vel_pub = self.create_publisher(
-                TwistStamped, '/mavros/setpoint_velocity/cmd_vel', 10)
+        # 注意: 发布到 /gesture/velocity_cmd 而非直接发布到 MAVROS
+        # 由 gesture_commander 统一转发到 /mavros/setpoint_velocity/cmd_vel
+        # 避免多个节点同时向 MAVROS 发送速度命令造成冲突
+        self.vel_pub = self.create_publisher(
+            TwistStamped, '/gesture/velocity_cmd', 10)
         self.status_pub = self.create_publisher(
             String, '/gesture/velocity_status', 10)
 
@@ -187,13 +188,14 @@ class GestureVelocityControllerNode(Node):
             self.current_gesture = gesture_id
 
             # 从 MediaPipe landmarks 提取手掌中心
-            # 使用 5 个指尖 (4,8,12,16,20) 取平均作为手掌中心
-            if 'landmarks' in data and len(data['landmarks']) > 20:
+            # 使用手腕(0) + 4个 MCP 关节(5,9,13,17) 取平均
+            # 比指尖(4,8,12,16,20)更稳定，指尖在手势切换时波动大
+            if 'landmarks' in data and len(data['landmarks']) >= 21:
                 lms = data['landmarks']
-                tip_ids = [4, 8, 12, 16, 20]
-                cx = sum(lms[i]['x'] for i in tip_ids) / 5.0
-                cy = sum(lms[i]['y'] for i in tip_ids) / 5.0
-                cz = sum(lms[i]['z'] for i in tip_ids) / 5.0
+                stable_ids = [0, 5, 9, 13, 17]  # wrist + 4 MCP
+                cx = sum(lms[i]['x'] for i in stable_ids) / 5.0
+                cy = sum(lms[i]['y'] for i in stable_ids) / 5.0
+                cz = sum(lms[i]['z'] for i in stable_ids) / 5.0
                 self.palm_center = (cx, cy, cz)
         except (json.JSONDecodeError, KeyError, ValueError):
             pass
@@ -210,6 +212,9 @@ class GestureVelocityControllerNode(Node):
                 self.get_logger().info('>>> Velocity control ENABLED')
             self.control_mode = "velocity"
         elif self.current_gesture == GestureID.FIST:
+            if self.enabled:
+                self.velocity_estimator.reset()
+                self.vel_filter.reset()
             self.enabled = False
             self.control_mode = "idle"
         elif self.current_gesture == GestureID.OK_SIGN:
@@ -238,18 +243,18 @@ class GestureVelocityControllerNode(Node):
             #   y: 向下为正 (0→1)
             #   z: 越远离摄像头越大
             #
-            # 无人机 body frame (NED):
+            # 无人机 body frame:
             #   vx: 前进为正
             #   vy: 右移为正
-            #   vz: 下降为正 (但通常我们用上升为正)
+            #   vz: 上升为正
             #
             # 映射关系 (摄像头正对操作者):
-            #   手向右移动 → 摄像头看到手向右 → vy+ (无人机右移)
-            #   手向前推 (远离摄像头) → z 减小 → vx+ (无人机前进)
-            #   手向上抬 → y 减小 → vz+ (无人机上升)
+            #   手向上抬 → y 减小 → vy_vel 负 → vx+ (无人机前进)
+            #   手向右移动 → x 增大 → vx_vel 正 → vy+ (无人机右移)
+            #   手向摄像头靠近 → z 减小 → vz_vel 负 → vz+ (无人机上升)
 
             # 非线性映射: tanh 限幅, 小动作灵敏度低, 大动作不超速
-            vx = self.max_vel * math.tanh(self.sensitivity * (-fy))  # 手上下 → 无人机前进
+            vx = self.max_vel * math.tanh(self.sensitivity * (-fy))  # 手上下 → 无人机前后
             vy = self.max_vel * math.tanh(self.sensitivity * fx)     # 手左右 → 无人机横移
             vz = self.max_vel * math.tanh(self.sensitivity * (-fz)) * 0.5  # 手深浅 → 升降(减速)
 
@@ -258,8 +263,8 @@ class GestureVelocityControllerNode(Node):
             vy = max(-self.max_vel, min(self.max_vel, vy))
             vz = max(-self.max_vel * 0.5, min(self.max_vel * 0.5, vz))
 
-        # 发布
-        if not self.test_mode and self.control_mode == "velocity":
+        # 发布速度命令 (仅 velocity 模式，由 commander 决定是否转发到 MAVROS)
+        if self.control_mode == "velocity":
             vel_msg = TwistStamped()
             vel_msg.header.stamp = self.get_clock().now().to_msg()
             vel_msg.twist.linear.x = vx
@@ -267,11 +272,11 @@ class GestureVelocityControllerNode(Node):
             vel_msg.twist.linear.z = vz
             vel_msg.twist.angular.z = vyaw
             self.vel_pub.publish(vel_msg)
-        elif self.test_mode and self.control_mode == "velocity":
-            self.get_logger().info(
-                f'[VEL] mode={self.control_mode} '
-                f'vel=({vx:.3f}, {vy:.3f}, {vz:.3f})',
-                throttle_duration_sec=0.5)
+            if self.test_mode:
+                self.get_logger().info(
+                    f'[VEL] mode={self.control_mode} '
+                    f'vel=({vx:.3f}, {vy:.3f}, {vz:.3f})',
+                    throttle_duration_sec=0.5)
 
         # 发布状态
         status = {

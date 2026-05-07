@@ -5,7 +5,6 @@
 
 import json
 import cv2
-import numpy as np
 import mediapipe as mp
 
 import rclpy
@@ -55,10 +54,16 @@ class GestureRecognizerNode(Node):
         # OpenCV 视频源
         if isinstance(self.video_source, str) and self.video_source.startswith(('rtsp://', 'http://')):
             self.cap = cv2.VideoCapture(self.video_source)
+        elif isinstance(self.video_source, int):
+            self.cap = cv2.VideoCapture(self.video_source)
         else:
-            self.cap = cv2.VideoCapture(int(self.video_source))
+            try:
+                self.cap = cv2.VideoCapture(int(self.video_source))
+            except (ValueError, TypeError):
+                self.cap = cv2.VideoCapture(self.video_source)
 
         if not self.cap.isOpened():
+            self.hands.close()
             raise RuntimeError(f'无法打开视频源: {self.video_source}')
 
         self.bridge = CvBridge()
@@ -85,16 +90,20 @@ class GestureRecognizerNode(Node):
         self.get_logger().info(f'手势识别节点已启动, 视频源: {self.video_source}')
 
     def process_frame(self):
-        ret, frame = self.cap.read()
-        if not ret:
-            self.get_logger().warn('无法读取视频帧')
+        try:
+            ret, frame = self.cap.read()
+            if not ret:
+                self.get_logger().warn('无法读取视频帧')
+                return
+
+            self.frame_count += 1
+
+            # 转换颜色空间 BGR → RGB
+            rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            results = self.hands.process(rgb_frame)
+        except Exception as e:
+            self.get_logger().error(f'process_frame 异常: {e}')
             return
-
-        self.frame_count += 1
-
-        # 转换颜色空间 BGR → RGB
-        rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        results = self.hands.process(rgb_frame)
 
         gesture_id = GestureID.NONE
         landmarks_data = None
@@ -173,13 +182,14 @@ class GestureRecognizerNode(Node):
                 img_msg = self.bridge.cv2_to_imgmsg(frame, 'bgr8')
                 img_msg.header.stamp = self.get_clock().now().to_msg()
                 self.image_pub.publish(img_msg)
-            except Exception as e:
+            except (TypeError, ValueError, cv2.error) as e:
                 self.get_logger().error(f'图像转换失败: {e}')
 
     def destroy_node(self):
-        if self.cap.isOpened():
+        if hasattr(self, 'cap') and self.cap.isOpened():
             self.cap.release()
-        self.hands.close()
+        if hasattr(self, 'hands'):
+            self.hands.close()
         super().destroy_node()
 
 

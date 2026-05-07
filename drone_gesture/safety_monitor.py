@@ -45,6 +45,8 @@ class SafetyMonitorNode(Node):
         self.safety_level = SafetyLevel.OK
         self.warnings = []
         self._emergency_triggered = False
+        self._emergency_retry_count = 0
+        self._emergency_max_retries = 3
 
         # QoS: BEST_EFFORT for sensor data
         qos = QoSProfile(depth=10, reliability=ReliabilityPolicy.BEST_EFFORT)
@@ -119,6 +121,7 @@ class SafetyMonitorNode(Node):
             if self._emergency_triggered:
                 self.get_logger().info('Safety: 所有警告已解除')
             self._emergency_triggered = False
+            self._emergency_retry_count = 0
 
         # 发布安全状态 JSON
         status = {
@@ -138,14 +141,44 @@ class SafetyMonitorNode(Node):
             self.get_logger().warn(f"Safety: {self.warnings}")
 
     def _emergency_land(self):
-        """紧急降落 - 切换到 LAND 模式"""
-        if not self.set_mode_client.wait_for_service(timeout_sec=1.0):
-            self.get_logger().error("set_mode unavailable")
+        """紧急降落 - 切换到 LAND 模式 (非阻塞，带重试)"""
+        if not self.set_mode_client.service_is_ready():
+            self.get_logger().warn("set_mode 服务未就绪，1秒后重试")
+            if self._emergency_retry_count < self._emergency_max_retries:
+                self._emergency_retry_count += 1
+                self.create_timer(1.0, self._emergency_land_retry_cb)
             return
         req = SetMode.Request()
         req.custom_mode = "LAND"
-        self.set_mode_client.call_async(req)
+        future = self.set_mode_client.call_async(req)
+        future.add_done_callback(self._on_emergency_land_done)
         self.get_logger().warn(">>> Emergency LAND triggered")
+
+    def _emergency_land_retry_cb(self):
+        """延迟重试回调 (一次性 timer)"""
+        self._emergency_land()
+
+    def _on_emergency_land_done(self, future):
+        try:
+            result = future.result()
+            if result.mode_sent:
+                self.get_logger().warn("Emergency LAND: 模式切换成功")
+                self._emergency_retry_count = 0
+            else:
+                self._retry_emergency_land()
+        except Exception as e:
+            self.get_logger().error(f"Emergency LAND 异常: {e}")
+            self._retry_emergency_land()
+
+    def _retry_emergency_land(self):
+        if self._emergency_retry_count < self._emergency_max_retries:
+            self._emergency_retry_count += 1
+            self.get_logger().warn(
+                f"Emergency LAND 重试 ({self._emergency_retry_count}/{self._emergency_max_retries})")
+            # 延迟 1 秒后重试，避免瞬间打满服务请求
+            self.create_timer(1.0, self._emergency_land_retry_cb)
+        else:
+            self.get_logger().error("Emergency LAND 重试耗尽!")
 
 
 def main(args=None):

@@ -17,6 +17,8 @@
   <exec_depend>image_transport</exec_depend>
   <exec_depend>mavros_msgs</exec_depend>
   <exec_depend>mavros</exec_depend>
+  <exec_depend>python3-opencv</exec_depend>
+  <exec_depend>python3-psutil</exec_depend>
 
   <test_depend>ament_copyright</test_depend>
   <test_depend>ament_flake8</test_depend>
